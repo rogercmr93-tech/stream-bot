@@ -216,6 +216,152 @@ async def notify(client, platform, info):
         log.error("Telegram respondió %s: %s", r.status_code, r.text)
 
 
+# ---------- Comandos de Telegram (/add, /remove, /list) ----------
+
+PLATFORMS = ("twitch", "youtube", "kick")
+ICONS = {"twitch": "🟣", "youtube": "🔴", "kick": "🟢"}
+HELP = (
+    "Comandos:\n"
+    "/add twitch ibai\n"
+    "/add kick xqc\n"
+    "/add youtube @ibai\n"
+    "/remove twitch ibai\n"
+    "/list\n\n"
+    "También vale pegar el enlace del canal, por ejemplo:\n"
+    "/add https://twitch.tv/ibai"
+)
+URL_PATTERNS = [
+    ("twitch", re.compile(r"twitch\.tv/([A-Za-z0-9_]+)", re.I)),
+    ("kick", re.compile(r"kick\.com/([A-Za-z0-9_-]+)", re.I)),
+    ("youtube", re.compile(r"youtube\.com/(@[\w.-]+|channel/UC[\w-]+)", re.I)),
+]
+
+
+def load_cfg():
+    try:
+        return json.loads(STREAMERS_FILE.read_text())
+    except FileNotFoundError:
+        return {}
+
+
+def save_cfg(cfg):
+    STREAMERS_FILE.write_text(
+        json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def normalize(platform, name):
+    name = name.strip()
+    if platform == "youtube":
+        if re.fullmatch(r"UC[\w-]{20,}", name):
+            return name
+        return "@" + name.lstrip("@")
+    return name.lstrip("@").lower()
+
+
+def parse_target(args):
+    """Devuelve (plataforma, nombre) a partir de '/add twitch ibai' o de un enlace."""
+    if not args:
+        return None
+    joined = " ".join(args)
+    for platform, rx in URL_PATTERNS:
+        m = rx.search(joined)
+        if m:
+            name = m.group(1)
+            if name.lower().startswith("channel/"):
+                name = name.split("/", 1)[1]
+            return platform, normalize(platform, name)
+    if len(args) >= 2 and args[0].lower() in PLATFORMS:
+        platform = args[0].lower()
+        return platform, normalize(platform, args[1])
+    return None
+
+
+def command_reply(text):
+    """Ejecuta un comando y devuelve el texto de respuesta (o None si se ignora)."""
+    parts = text.split()
+    cmd = parts[0].split("@")[0].lower()
+    args = parts[1:]
+
+    if cmd in ("/start", "/help"):
+        return HELP
+
+    cfg = load_cfg()
+
+    if cmd == "/list":
+        lines = []
+        for p in PLATFORMS:
+            names = cfg.get(p, [])
+            lines.append(f"{ICONS[p]} {p.capitalize()}: " + (", ".join(names) or "—"))
+        return "\n".join(lines)
+
+    if cmd in ("/add", "/remove"):
+        target = parse_target(args)
+        if not target:
+            return "No te entendí. Ejemplo: /add twitch ibai\n\n" + HELP
+        platform, name = target
+        current = cfg.get(platform, [])
+        key = name.lower()
+        exists = any(x.lower() == key for x in current)
+        if cmd == "/add":
+            if exists:
+                return f"{name} ya estaba en {platform.capitalize()}."
+            cfg[platform] = current + [name]
+            save_cfg(cfg)
+            return f"✅ Añadido {name} a {platform.capitalize()}."
+        if not exists:
+            return f"{name} no estaba en {platform.capitalize()}."
+        cfg[platform] = [x for x in current if x.lower() != key]
+        save_cfg(cfg)
+        return f"🗑️ Quitado {name} de {platform.capitalize()}."
+
+    return None
+
+
+async def send_text(client, text):
+    r = await client.post(
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        json={"chat_id": TG_CHAT, "text": text, "disable_web_page_preview": True},
+    )
+    if r.status_code != 200:
+        log.error("Telegram respondió %s: %s", r.status_code, r.text)
+
+
+async def handle_commands(client, state):
+    """Lee los mensajes nuevos del chat y ejecuta los comandos."""
+    try:
+        r = await client.get(
+            f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates",
+            params={
+                "offset": state.get("tg_offset", 0),
+                "timeout": 0,
+                "allowed_updates": json.dumps(["message"]),
+            },
+        )
+        r.raise_for_status()
+        updates = r.json().get("result", [])
+    except Exception as e:
+        log.warning("No pude leer los mensajes de Telegram: %s", e)
+        return
+
+    for u in updates:
+        state["tg_offset"] = u["update_id"] + 1
+        msg = u.get("message") or {}
+        # Solo obedece al chat configurado: nadie más puede cambiar la lista.
+        if str((msg.get("chat") or {}).get("id")) != str(TG_CHAT):
+            continue
+        text = (msg.get("text") or "").strip()
+        if not text.startswith("/"):
+            continue
+        try:
+            reply = command_reply(text)
+        except Exception as e:
+            log.error("Error en el comando %r: %s", text, e)
+            reply = "⚠️ Hubo un error con ese comando."
+        if reply:
+            await send_text(client, reply)
+
+
 # ---------- Lógica principal ----------
 
 
@@ -232,7 +378,8 @@ def save_state(state):
 
 
 async def cycle(client, state):
-    """Una revisión completa de las tres plataformas."""
+    """Una revisión completa: primero los comandos, luego las tres plataformas."""
+    await handle_commands(client, state)
     try:
         cfg = json.loads(STREAMERS_FILE.read_text())
     except Exception as e:
