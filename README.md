@@ -31,10 +31,25 @@ Si no usas una plataforma, deja su lista vacía en `streamers.json` y no pongas 
 
 Desde ahí corre solo cada 5 minutos.
 
-## 4. Elegir streamers
-Edita `streamers.json` en GitHub (el lápiz en la web) y guarda:
-- Twitch y Kick: el nombre del canal (el de la URL).
-- YouTube: el `@handle` o el ID del canal (`UC...`).
+## 4. Elegir streamers (desde Telegram)
+Escríbele al bot en tu chat:
+
+| Comando | Qué hace |
+|---|---|
+| `/add twitch ibai` | Añade un canal de Twitch |
+| `/add kick xqc` | Añade un canal de Kick |
+| `/add youtube @ibai` | Añade un canal de YouTube |
+| `/remove twitch ibai` | Quita un canal |
+| `/list` | Muestra tu lista |
+| `/help` | Muestra la ayuda |
+
+También vale pegar el enlace: `/add https://twitch.tv/ibai`.
+
+El bot lee tus mensajes en cada ejecución (cada 5 minutos), así que la respuesta puede
+tardar unos minutos. Solo obedece al chat configurado en `TELEGRAM_CHAT_ID`.
+Los cambios se guardan solos en `streamers.json` dentro del repo.
+
+También puedes editar `streamers.json` a mano en GitHub (el lápiz en la web).
 
 ## Notas importantes
 - El repo es público, así que `streamers.json` y `state.json` se ven. Las claves no:
