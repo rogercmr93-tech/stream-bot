@@ -1,0 +1,30 @@
+name: Mantener activo
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Commit vacío (cuenta como actividad)
+        run: |
+          git config user.name "stream-bot"
+          git config user.email "stream-bot@users.noreply.github.com"
+          git commit --allow-empty -m "Mantener activo el repositorio"
+          git pull --rebase
+          git push
+
+      - name: Asegurar que la revisión de directos sigue habilitada
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow enable check.yml --repo "${{ github.repository }}" || true
