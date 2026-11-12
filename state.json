@@ -1,8 +1,9 @@
 {
-  "kick": [],
-  "tg_offset": 132024976,
-  "twitch": [
-    "auronplay"
+  "kick": [
+    "amouranth",
+    "xqc"
   ],
+  "tg_offset": 132024976,
+  "twitch": [],
   "youtube": []
 }
